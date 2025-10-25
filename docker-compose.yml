@@ -1,0 +1,11 @@
+version: '3.8'
+
+services:
+  server:
+    build: .
+    image: colyseus-server
+    ports:
+      - "2567:2567"
+    env_file:
+      - ./.env.production
+    restart: always

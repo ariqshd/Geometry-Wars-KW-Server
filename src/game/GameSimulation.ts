@@ -583,7 +583,7 @@ export class GameSimulation {
     // =================================================================
 
     /**
-     * [NEW] Calculates the grid cell key for a given position.
+     * Calculates the grid cell key for a given position.
      */
     private getCellKey(x: number, y: number): string {
         const cellX = Math.floor(x / C.CELL_SIZE);
@@ -592,7 +592,7 @@ export class GameSimulation {
     }
 
     /**
-     * [NEW] Rebuilds the spatial grid from scratch.
+     * Rebuilds the spatial grid from scratch.
      * Called once per tick *after* all entities have moved.
      */
     private updateSpatialGrid() {
@@ -614,7 +614,7 @@ export class GameSimulation {
     }
 
     /**
-     * [NEW] Gets all entity IDs in the 3x3 grid area around a position.
+     * Gets all entity IDs in the 3x3 grid area around a position.
      */
     private getNearbyEntities(x: number, y: number): Set<string> {
         const nearbyEntities = new Set<string>();
