@@ -1,0 +1,681 @@
+// GameSimulation.ts
+
+import { GameState, Player, Enemy, Bullet } from "../rooms/schema/GameState";
+import { GameRoom } from "../rooms/GameRoom";
+
+// Define the structure for storing non-synced bullet data
+interface InternalBulletData {
+  velocityX: number;
+  velocityY: number;
+  life: number; // Time in ms
+}
+
+// Define the structure for storing player inputs
+interface PlayerInput {
+  horizontal: number; // -1, 0, or 1
+  vertical: number;   // -1, 0, or 1
+  angle: number;      // Player's aiming angle
+}
+
+interface WindProfile {
+    speed: number;
+    direction: number;
+}
+
+const PLAYER_COLORS = [
+    "#00FF00", // Green
+    "#0000FF", // Blue
+    "#FFFF00", // Yellow
+    "#FF00FF", // Magenta
+    "#00FFFF", // Cyan
+    "#FFFFFF", // White
+    "#FFA500", // Orange
+];
+
+// --- Game Constants ---
+const PLAYER_SPEED = 25; // Pixels per second
+const BULLET_SPEED = 40;
+const ENEMY_SPEED = 15;
+const BULLET_LIFETIME = 1000; // 1 second
+const PLAYER_SPAWN_INVULNERABILITY = 3000; // 3000ms = 3 seconds
+const AI_STOPPING_DISTANCE = 20; // Stop AI 20 units from player (fixes AI loop)
+const PLAYER_MAX_HEALTH = 3;
+const ENEMY_DAMAGE = 1;     
+const PLAYER_POST_HIT_INVULNERABILITY = 500; // 0.5 sec
+
+// --- Arena & Grid Constants ---
+const ARENA_WIDTH = 80;
+const ARENA_HEIGHT = 80;
+const HALF_WIDTH = ARENA_WIDTH / 2;
+const HALF_HEIGHT = ARENA_HEIGHT / 2
+const CELL_SIZE = 10; // For the spatial grid. 10x10 grid.
+
+// --- Collision Constants ---
+const PLAYER_HIT_RADIUS = 0.5;
+const ENEMY_HIT_RADIUS = 0.8;
+const BULLET_HIT_RADIUS = 0.3; // Bullets are small
+
+// --- Spawning Constants ---
+const MIN_SPAWN_DISTANCE_FROM_PLAYER = 20; // Don't spawn within 20 units of a player
+const MAX_SPAWN_ATTEMPTS = 10; // Try 10 times to find a safe spot
+const BORDER_SPAWN_CHANCE = 0.75; // 75% chance to spawn at the edge
+const BORDER_MARGIN = 20;
+
+// --- Wind Constants ---
+const WIND_PHASE_DURATION = 60000; // 60,000ms = 1 minute per phase
+const INITIAL_CALM_DURATION = 60000; // 1 minute of no wind at the start
+const WIND_SHIFT_DURATION = 5000; // 5,000ms = 5 sec transition time
+const WIND_SCALING_FACTOR = 0.27; // Scale wind speed to game units
+const MAX_WIND_FORCE_COMPONENT = 15; // Max X or Y component of wind force
+
+export class GameSimulation {
+    private state: GameState;
+    private room: GameRoom;
+
+    // --- Internal (non-synced) state ---
+
+    // Store the last processed input for each player
+    private playerInputs = new Map<string, PlayerInput>();
+    
+    // Store non-synced data for bullets (velocity, life)
+    private internalBulletData = new Map<string, InternalBulletData>();
+
+    // Entity ID counter
+    private entityIdCounter: number = 0;
+
+    // Game logic timers
+    private enemySpawnTimer: number = 0;
+    private readonly enemySpawnInterval: number = 1000; // 1 second
+    
+    // --- Spatial Grid ---
+    // Key: "cellX_cellY", Value: Set of entity IDs in that cell
+    private spatialGrid = new Map<string, Set<string>>();
+    
+    // --- Cleanup Sets ---
+    // Sets of IDs to be removed at the end of the tick
+    private bulletsToRemove = new Set<string>();
+    private enemiesToRemove = new Set<string>();
+
+    private playerInvulnerability = new Map<string, number>(); // <sessionId, ms_remaining>
+    private playerPostHitInvuln = new Map<string, number>();
+
+    private windProfiles: WindProfile[];
+    private currentPhaseIndex = 0;
+    private windPhaseTimer = WIND_PHASE_DURATION;
+    private targetWindX = 0;
+    private targetWindY = 0;
+    private isInInitialCalm: boolean = true
+
+    private nextColorIndex = 0;
+    
+    constructor(state: GameState, room: GameRoom, windProfiles: WindProfile[]){
+        this.state = state;
+        this.room = room;
+        this.windProfiles = windProfiles;
+
+        this.windPhaseTimer = INITIAL_CALM_DURATION;
+        this.isInInitialCalm = true;
+        
+        this.targetWindX = 0;
+        this.targetWindY = 0;
+        this.state.windForceX = 0;
+        this.state.windForceY = 0;
+    }
+
+    // =================================================================
+    // PUBLIC API (Called by GameRoom)
+    // =================================================================
+
+    public addPlayer(sessionId: string, name: string) {
+
+        const color = PLAYER_COLORS[this.nextColorIndex % PLAYER_COLORS.length];
+        this.nextColorIndex++;
+
+        const player = new Player().assign({
+            id: sessionId,
+            name: name || "Player",
+            x: (Math.random() * ARENA_WIDTH) - HALF_WIDTH,
+            y: (Math.random() * ARENA_HEIGHT) - HALF_HEIGHT,
+            angle: 0,
+            score: 0,
+            isAlive: true,
+            health: PLAYER_MAX_HEALTH,
+            color: color
+        });
+
+        this.state.players.set(sessionId, player);
+        this.playerInputs.set(sessionId, { horizontal: 0, vertical: 0, angle: 0 });
+
+        this.playerInvulnerability.set(sessionId, PLAYER_SPAWN_INVULNERABILITY);
+        this.playerPostHitInvuln.set(sessionId, 0);
+    }
+
+    public removePlayer(sessionId: string) {
+        this.state.players.delete(sessionId);
+        this.playerInputs.delete(sessionId);
+        this.playerInvulnerability.delete(sessionId);
+        this.playerPostHitInvuln.delete(sessionId);
+    }
+
+    /**
+     * Stores and *sanitizes* player input.
+     */
+    public handleInput(sessionId: string, input: PlayerInput) {
+        const player = this.state.players.get(sessionId);
+        if (player && player.isAlive) {
+
+            // Sanitize and clamp input values
+            let horizontal = Math.max(-1, Math.min(1, input.horizontal || 0));
+            let vertical = Math.max(-1, Math.min(1, input.vertical || 0));
+
+            // Normalize diagonal movement
+            const magnitude = Math.hypot(horizontal, vertical);
+            if (magnitude > 1) {
+                horizontal /= magnitude;
+                vertical /= magnitude;
+            }
+
+            this.playerInputs.set(sessionId, {
+                horizontal: horizontal,
+                vertical: vertical,
+                angle: input.angle || 0
+            });
+        }
+    }
+
+    /**
+     * Creates a new *synced* bullet.
+     */
+    public handleShoot(sessionId: string, shootData: { angle: number }) {
+        const player = this.state.players.get(sessionId);
+        if (!player || !player.isAlive) return;
+
+        // Use reliable, incrementing ID
+        const bulletId = `bullet_${this.entityIdCounter++}`;
+        const angle = shootData.angle;
+
+        // 1. Create the synced state object
+        const bullet = new Bullet().assign({
+            id: bulletId,
+            ownerId: sessionId,
+            x: player.x,
+            y: player.y,
+        });
+
+        // 2. Create the internal, non-synced data object
+        this.internalBulletData.set(bulletId, {
+            velocityX: Math.cos(angle) * BULLET_SPEED,
+            velocityY: Math.sin(angle) * BULLET_SPEED,
+            life: BULLET_LIFETIME,
+        });
+
+        // 3. Add to the state. Colyseus will sync this to all clients.
+        this.state.bullets.set(bulletId, bullet);
+    }
+
+    public setWindPhase(phaseIndex: number) {
+        if (phaseIndex >= this.windProfiles.length) {
+            phaseIndex = 0; // Loop back to the start
+        }
+
+        const profile = this.windProfiles[phaseIndex];
+        this.currentPhaseIndex = phaseIndex;
+
+        // Convert profile to target forces
+        const angleRadians = (profile.direction - 90) * (Math.PI / 180);
+        const force = profile.speed * WIND_SCALING_FACTOR;
+
+        let forceX = Math.cos(angleRadians) * force;
+        let forceY = Math.sin(angleRadians) * force;
+
+        // Clamp the final force components to a max value
+        this.targetWindX = Math.max(-MAX_WIND_FORCE_COMPONENT, Math.min(MAX_WIND_FORCE_COMPONENT, forceX));
+        this.targetWindY = Math.max(-MAX_WIND_FORCE_COMPONENT, Math.min(MAX_WIND_FORCE_COMPONENT, forceY));
+
+        console.log(`[Wind] Shifting to Phase ${phaseIndex}. Target: (${this.targetWindX.toFixed(2)}, ${this.targetWindY.toFixed(2)})`);
+        
+        // Broadcast a warning to clients
+        this.room.broadcast("wind_shift_warning", { windX: this.targetWindX, windY: this.targetWindY });
+    }
+
+    /**
+     * This is the main game loop, called by setSimulationInterval.
+     * Order of operations is now critical.
+     */
+    public update(deltaTime: number) {
+        const dtSeconds = deltaTime / 1000; // Convert ms to seconds
+
+        this.bulletsToRemove.clear();
+        this.enemiesToRemove.clear();
+
+        this.updateTimers(deltaTime);
+        
+        this.processPlayerInputs(dtSeconds);
+
+        this.updateWind(deltaTime, dtSeconds);
+
+        this.updateAI(dtSeconds);        // Moves enemies
+        this.updateBullets(dtSeconds); // Moves bullets, flags expired ones for removal
+
+        this.updateSpatialGrid();
+
+        this.checkCollisions();
+
+        this.updateSpawning(deltaTime);
+
+        this.cleanupEntities();
+    }
+
+    // =================================================================
+    // PRIVATE - SIMULATION LOGIC
+    // =================================================================
+
+    private updateTimers(deltaTime: number) {
+        this.playerInvulnerability.forEach((timeLeft, sessionId) => {
+            if (timeLeft > 0) {
+                this.playerInvulnerability.set(sessionId, timeLeft - deltaTime);
+            }
+        });
+
+        this.playerPostHitInvuln.forEach((timeLeft, sessionId) => {
+            if (timeLeft > 0) {
+                this.playerPostHitInvuln.set(sessionId, timeLeft - deltaTime);
+            }
+        });
+    }
+
+    private processPlayerInputs(dt: number) {
+
+        const windX = this.state.windForceX;
+        const windY = this.state.windForceY;
+
+        this.playerInputs.forEach((input, sessionId) => {
+            const player = this.state.players.get(sessionId);
+            if (!player || !player.isAlive){
+                return;
+            }
+
+            // Apply movement
+            player.x += input.horizontal * PLAYER_SPEED * dt;
+            player.y += input.vertical * PLAYER_SPEED * dt;
+            player.angle = input.angle;
+
+            // --- Apply Arena Current ---
+            player.x += windX * dt;
+            player.y += windY * dt;
+            
+            // Add boundary checks
+            player.x = Math.max(-HALF_WIDTH, Math.min(HALF_WIDTH, player.x));
+            player.y = Math.max(-HALF_HEIGHT, Math.min(HALF_HEIGHT, player.y));
+        });
+    }
+
+    private updateWind(deltaTime: number, dtSeconds: number) {
+        // 1. Tick down the phase timer
+        this.windPhaseTimer -= deltaTime;
+
+        if (this.windPhaseTimer <= 0) {
+            // Check if we were in the initial calm period
+            if (this.isInInitialCalm) {
+                // The calm period is over! Start the first *real* phase
+                this.isInInitialCalm = false;
+                this.windPhaseTimer = WIND_PHASE_DURATION; // Reset timer
+                this.setWindPhase(0); // Set to phase 0
+            } else {
+                // We were in a normal phase, so advance
+                this.windPhaseTimer = WIND_PHASE_DURATION; // Reset timer
+                this.setWindPhase(this.currentPhaseIndex + 1); // Go to next phase
+            }
+        }
+
+        // 2. Smoothly interpolate the *actual* wind force towards the *target*
+        // This is a simple "lerp" (Linear Interpolation)
+        const lerpFactor = dtSeconds / (WIND_SHIFT_DURATION / 1000);
+
+        this.state.windForceX += (this.targetWindX - this.state.windForceX) * lerpFactor;
+        this.state.windForceY += (this.targetWindY - this.state.windForceY) * lerpFactor;
+    }
+
+    /**
+     * Moves synced bullets based on internal data.
+     */
+    private updateBullets(dt: number) {
+        const windX = this.state.windForceX;
+        const windY = this.state.windForceY;
+
+        for (const bullet of this.state.bullets.values()) {
+            const internalData = this.internalBulletData.get(bullet.id);
+            if (!internalData) continue;
+
+            // Apply movement
+            bullet.x += internalData.velocityX * dt;
+            bullet.y += internalData.velocityY * dt;
+
+            // --- Apply Arena Current ---
+            bullet.x += windX * dt;
+            bullet.y += windY * dt;
+
+            internalData.life -= (dt * 1000); // Decrement lifetime in ms
+
+            // Check for removal (lifetime or out of bounds)
+            if (internalData.life <= 0 ||
+                bullet.x < -HALF_WIDTH || bullet.x > HALF_WIDTH ||
+                bullet.y < -HALF_HEIGHT || bullet.y > HALF_HEIGHT)
+            {
+                this.bulletsToRemove.add(bullet.id);
+            }
+        }
+    }
+
+    /**
+     * Uses spatial grid to find nearest player.
+     */
+    private updateAI(dt: number) {
+
+        const windX = this.state.windForceX;
+        const windY = this.state.windForceY;
+
+        this.state.enemies.forEach((enemy) => {
+            
+            // Find nearby entities using the grid
+            const nearbyEntities = this.getNearbyEntities(enemy.x, enemy.y);
+            
+            // Find nearest player from the *nearby* set
+            let nearestPlayer: Player = null;
+            let minDistance = Infinity;
+
+            for (const entityId of nearbyEntities) {
+                const player = this.state.players.get(entityId);
+                
+                // Check if it's a player and is alive
+                if (player && player.isAlive) {
+                    const dist = Math.hypot(enemy.x - player.x, enemy.y - player.y);
+                    if (dist < minDistance) {
+                        minDistance = dist;
+                        nearestPlayer = player;
+                    }
+                }
+            }
+
+            if (nearestPlayer) {
+                // Move towards player
+                const angle = Math.atan2(nearestPlayer.y - enemy.y, nearestPlayer.x - enemy.x);
+                enemy.x += Math.cos(angle) * ENEMY_SPEED * dt;
+                enemy.y += Math.sin(angle) * ENEMY_SPEED * dt;
+
+                // --- Apply Arena Current ---
+                enemy.x += windX * dt;
+                enemy.y += windY * dt;
+                
+                // Boundary check
+                enemy.x = Math.max(-HALF_WIDTH, Math.min(HALF_WIDTH, enemy.x));
+                enemy.y = Math.max(-HALF_HEIGHT, Math.min(HALF_HEIGHT, enemy.y));
+            }
+        });
+    }
+
+    /**
+     * Uses spatial grid for efficient collision checks.
+     */
+    private checkCollisions() {
+        // --- Check Bullets vs. Enemies ---
+        for (const bullet of this.state.bullets.values()) {
+            if (this.bulletsToRemove.has(bullet.id)) continue; // Already marked for removal
+
+            const nearbyEntities = this.getNearbyEntities(bullet.x, bullet.y);
+            
+            for (const entityId of nearbyEntities) {
+                const enemy = this.state.enemies.get(entityId);
+
+                // Check if it's an enemy and not already marked for removal
+                if (enemy && !this.enemiesToRemove.has(enemy.id)) {
+                    const distance = Math.hypot(bullet.x - enemy.x, bullet.y - enemy.y);
+                    
+                    if (distance < BULLET_HIT_RADIUS + ENEMY_HIT_RADIUS) {
+                        // HIT!
+                        this.bulletsToRemove.add(bullet.id);
+                        this.enemiesToRemove.add(enemy.id);
+
+                        // Grant score to the player
+                        const player = this.state.players.get(bullet.ownerId);
+                        if (player) {
+                            player.score += 100;
+                        }
+                        
+                        // A bullet can only hit one enemy, so we break
+                        break; 
+                    }
+                }
+            }
+        }
+
+        // --- Check Player vs. Enemies ---
+        for (const player of this.state.players.values()) {
+            if (!player.isAlive) continue;
+
+            const invulnerableTime = this.playerInvulnerability.get(player.id);
+            if (invulnerableTime && invulnerableTime > 0) {
+                continue; // Skip collision check
+            }
+
+            if (this.playerPostHitInvuln.get(player.id) > 0) continue;
+            
+            const nearbyEntities = this.getNearbyEntities(player.x, player.y);
+
+            for (const entityId of nearbyEntities) {
+                const enemy = this.state.enemies.get(entityId);
+
+                if (enemy && !this.enemiesToRemove.has(enemy.id)) {
+                    const distance = Math.hypot(player.x - enemy.x, player.y - enemy.y);
+                    
+                    if (distance < PLAYER_HIT_RADIUS + ENEMY_HIT_RADIUS) {
+                        // Player is hit!
+                        player.health -= ENEMY_DAMAGE;
+
+                        this.playerPostHitInvuln.set(player.id, PLAYER_POST_HIT_INVULNERABILITY);
+
+                        this.room.broadcast("player_hit", { sessionId: player.id });
+
+                        if (player.health <= 0) {
+                            player.isAlive = false;
+                            this.room.broadcast("player_died", { sessionId: player.id });
+                        }
+
+                        this.enemiesToRemove.add(enemy.id);
+                    }
+                }
+            }
+        }
+    }
+
+    private updateSpawning(deltaTime: number) {
+        this.enemySpawnTimer += deltaTime;
+        if (this.enemySpawnTimer < this.enemySpawnInterval) {
+            return;
+        }
+        
+        this.enemySpawnTimer = 0; // Reset timer
+        this.spawnEnemy();
+    }
+
+    private spawnEnemy() {
+        let spawnX = 0;
+        let spawnY = 0;
+        let isSafe = false;
+
+        // Define the "center" rectangle coordinates
+        const CENTER_MIN_X = -HALF_WIDTH + BORDER_MARGIN;  // e.g., -40 + 20 = -20
+        const CENTER_MAX_X = HALF_WIDTH - BORDER_MARGIN;   // e.g.,  40 - 20 =  20
+        const CENTER_MIN_Y = -HALF_HEIGHT + BORDER_MARGIN; // e.g., -20
+        const CENTER_MAX_Y = HALF_HEIGHT - BORDER_MARGIN;  // e.g.,  20
+        
+        // The total width/height of the inner center area
+        const CENTER_WIDTH = ARENA_WIDTH - (BORDER_MARGIN * 2);   // e.g., 40
+        const CENTER_HEIGHT = ARENA_HEIGHT - (BORDER_MARGIN * 2); // e.g., 40
+
+        // Try up to MAX_SPAWN_ATTEMPTS times to find a safe spot
+        for (let i = 0; i < MAX_SPAWN_ATTEMPTS; i++) {
+            
+            // --- 1. Generate a weighted spawn point ---
+            if (Math.random() < BORDER_SPAWN_CHANCE) {
+                // --- Try to spawn in the BORDER area ---
+                
+                // Pick a random point in the *whole* arena
+                spawnX = (Math.random() * ARENA_WIDTH) - HALF_WIDTH;  // -40 to 40
+                spawnY = (Math.random() * ARENA_HEIGHT) - HALF_HEIGHT; // -40 to 40
+
+                // Check if it's in the center
+                const inCenter = spawnX > CENTER_MIN_X && spawnX < CENTER_MAX_X &&
+                                 spawnY > CENTER_MIN_Y && spawnY < CENTER_MAX_Y;
+
+                if (inCenter) {
+                    // It's in the center, but we want a border spawn.
+                    // "Push" it to one of the 4 border strips randomly.
+                    const side = Math.floor(Math.random() * 4);
+                    switch (side) {
+                        case 0: // Push to Top border
+                            spawnY = (Math.random() * BORDER_MARGIN) + CENTER_MAX_Y; // 20 to 40
+                            break;
+                        case 1: // Push to Bottom border
+                            spawnY = -((Math.random() * BORDER_MARGIN) + CENTER_MAX_Y); // -20 to -40
+                            break;
+                        case 2: // Push to Right border
+                            spawnX = (Math.random() * BORDER_MARGIN) + CENTER_MAX_X; // 20 to 40
+                            break;
+                        case 3: // Push to Left border
+                            spawnX = -((Math.random() * BORDER_MARGIN) + CENTER_MAX_X); // -20 to -40
+                            break;
+                    }
+                }
+                // If it wasn't in the center, we're good! We'll use the random point.
+
+            } else {
+                // --- Try to spawn in the CENTER area ---
+                spawnX = (Math.random() * CENTER_WIDTH) + CENTER_MIN_X;   // -20 to 20
+                spawnY = (Math.random() * CENTER_HEIGHT) + CENTER_MIN_Y; // -20 to 20
+            }
+
+            // --- 2. Check if the spot is safe ---
+            isSafe = true;
+            for (const player of this.state.players.values()) {
+                if (!player.isAlive) continue;
+
+                const distance = Math.hypot(spawnX - player.x, spawnY - player.y);
+                if (distance < MIN_SPAWN_DISTANCE_FROM_PLAYER) {
+                    isSafe = false; // Too close!
+                    break; 
+                }
+            }
+
+            if (isSafe) {
+                break;
+            }
+        }
+        
+        // --- 3. Create the enemy ---
+        const enemyId = `enemy_${this.entityIdCounter++}`;
+        const enemy = new Enemy().assign({
+            id: enemyId,
+            type: 0,
+            x: spawnX,
+            y: spawnY,
+        });
+
+        this.state.enemies.set(enemyId, enemy);
+    }
+
+    /**
+     * Uses incrementing ID and arena bounds.
+     */
+    private spawnEnemies(deltaTime: number) {
+        this.enemySpawnTimer += deltaTime;
+        if (this.enemySpawnTimer < this.enemySpawnInterval) {
+            return;
+        }
+        
+        this.enemySpawnTimer = 0; // Reset timer
+
+        // Spawn one enemy
+        const enemyId = `enemy_${this.entityIdCounter++}`;
+        const enemy = new Enemy().assign({
+            id: enemyId,
+            type: 0, // Grunt
+            x: (Math.random() * ARENA_WIDTH) - HALF_WIDTH,
+            y: (Math.random() * ARENA_HEIGHT) - HALF_HEIGHT,
+        });
+
+        this.state.enemies.set(enemyId, enemy);
+    }
+  
+    /**
+     * Cleans up entities from the *state* and internal maps.
+     */
+    private cleanupEntities() {
+        // Remove enemies
+        this.enemiesToRemove.forEach((id) => {
+            this.state.enemies.delete(id);
+        });
+        
+        // Remove bullets
+        this.bulletsToRemove.forEach((id) => {
+            this.state.bullets.delete(id);
+            this.internalBulletData.delete(id); // Clean up internal data
+        });
+    }
+
+    // =================================================================
+    // PRIVATE - SPATIAL GRID
+    // =================================================================
+
+    /**
+     * [NEW] Calculates the grid cell key for a given position.
+     */
+    private getCellKey(x: number, y: number): string {
+        const cellX = Math.floor(x / CELL_SIZE);
+        const cellY = Math.floor(y / CELL_SIZE);
+        return `${cellX}_${cellY}`;
+    }
+
+    /**
+     * [NEW] Rebuilds the spatial grid from scratch.
+     * Called once per tick *after* all entities have moved.
+     */
+    private updateSpatialGrid() {
+        this.spatialGrid.clear();
+
+        // Helper to add any entity with id, x, y to the grid
+        const addToGrid = (entity: { id: string, x: number, y: number }) => {
+            const key = this.getCellKey(entity.x, entity.y);
+            if (!this.spatialGrid.has(key)) {
+                this.spatialGrid.set(key, new Set());
+            }
+            this.spatialGrid.get(key)!.add(entity.id);
+        };
+
+        // Add all entities
+        this.state.players.forEach(addToGrid);
+        this.state.enemies.forEach(addToGrid);
+        this.state.bullets.forEach(addToGrid);
+    }
+
+    /**
+     * [NEW] Gets all entity IDs in the 3x3 grid area around a position.
+     */
+    private getNearbyEntities(x: number, y: number): Set<string> {
+        const nearbyEntities = new Set<string>();
+        const originCellX = Math.floor(x / CELL_SIZE);
+        const originCellY = Math.floor(y / CELL_SIZE);
+
+        for (let i = -1; i <= 1; i++) {
+            for (let j = -1; j <= 1; j++) {
+                const key = `${originCellX + i}_${originCellY + j}`;
+                
+                if (this.spatialGrid.has(key)) {
+                    // Add all entity IDs from this cell
+                    this.spatialGrid.get(key)!.forEach(id => nearbyEntities.add(id));
+                }
+            }
+        }
+        return nearbyEntities;
+    }
+}
