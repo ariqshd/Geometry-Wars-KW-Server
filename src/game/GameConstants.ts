@@ -1,0 +1,48 @@
+// GameConstants.ts
+
+// Player color palette
+export const PLAYER_COLORS = [
+    "#00FF00", // Green
+    "#0000FF", // Blue
+    "#FFFF00", // Yellow
+    "#FF00FF", // Magenta
+    "#00FFFF", // Cyan
+    "#FFFFFF", // White
+    "#FFA500", // Orange
+];
+
+// --- Game Constants ---
+export const PLAYER_SPEED = 25; // Pixels per second
+export const BULLET_SPEED = 40;
+export const ENEMY_SPEED = 15;
+export const BULLET_LIFETIME = 1000; // 1 second
+export const PLAYER_SPAWN_INVULNERABILITY = 3000; // 3000ms = 3 seconds
+export const AI_STOPPING_DISTANCE = 20; // Stop AI 20 units from player (fixes AI loop)
+export const PLAYER_MAX_HEALTH = 3;
+export const ENEMY_DAMAGE = 1;
+export const PLAYER_POST_HIT_INVULNERABILITY = 500; // 0.5 sec
+
+// --- Arena & Grid Constants ---
+export const ARENA_WIDTH = 80;
+export const ARENA_HEIGHT = 80;
+export const HALF_WIDTH = ARENA_WIDTH / 2;
+export const HALF_HEIGHT = ARENA_HEIGHT / 2;
+export const CELL_SIZE = 10; // For the spatial grid. 10x10 grid.
+
+// --- Collision Constants ---
+export const PLAYER_HIT_RADIUS = 0.5;
+export const ENEMY_HIT_RADIUS = 0.8;
+export const BULLET_HIT_RADIUS = 0.3; // Bullets are small
+
+// --- Spawning Constants ---
+export const MIN_SPAWN_DISTANCE_FROM_PLAYER = 20; // Don't spawn within 20 units of a player
+export const MAX_SPAWN_ATTEMPTS = 10; // Try 10 times to find a safe spot
+export const BORDER_SPAWN_CHANCE = 0.75; // 75% chance to spawn at the edge
+export const BORDER_MARGIN = 20;
+
+// --- Wind Constants ---
+export const WIND_PHASE_DURATION = 60000; // 60,000ms = 1 minute per phase
+export const INITIAL_CALM_DURATION = 60000; // 1 minute of no wind at the start
+export const WIND_SHIFT_DURATION = 5000; // 5,000ms = 5 sec transition time
+export const WIND_SCALING_FACTOR = 0.27; // Scale wind speed to game units
+export const MAX_WIND_FORCE_COMPONENT = 15; // Max X or Y component of wind force

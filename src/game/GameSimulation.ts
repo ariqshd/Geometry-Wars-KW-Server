@@ -21,52 +21,7 @@ interface WindProfile {
     speed: number;
     direction: number;
 }
-
-const PLAYER_COLORS = [
-    "#00FF00", // Green
-    "#0000FF", // Blue
-    "#FFFF00", // Yellow
-    "#FF00FF", // Magenta
-    "#00FFFF", // Cyan
-    "#FFFFFF", // White
-    "#FFA500", // Orange
-];
-
-// --- Game Constants ---
-const PLAYER_SPEED = 25; // Pixels per second
-const BULLET_SPEED = 40;
-const ENEMY_SPEED = 15;
-const BULLET_LIFETIME = 1000; // 1 second
-const PLAYER_SPAWN_INVULNERABILITY = 3000; // 3000ms = 3 seconds
-const AI_STOPPING_DISTANCE = 20; // Stop AI 20 units from player (fixes AI loop)
-const PLAYER_MAX_HEALTH = 3;
-const ENEMY_DAMAGE = 1;     
-const PLAYER_POST_HIT_INVULNERABILITY = 500; // 0.5 sec
-
-// --- Arena & Grid Constants ---
-const ARENA_WIDTH = 80;
-const ARENA_HEIGHT = 80;
-const HALF_WIDTH = ARENA_WIDTH / 2;
-const HALF_HEIGHT = ARENA_HEIGHT / 2
-const CELL_SIZE = 10; // For the spatial grid. 10x10 grid.
-
-// --- Collision Constants ---
-const PLAYER_HIT_RADIUS = 0.5;
-const ENEMY_HIT_RADIUS = 0.8;
-const BULLET_HIT_RADIUS = 0.3; // Bullets are small
-
-// --- Spawning Constants ---
-const MIN_SPAWN_DISTANCE_FROM_PLAYER = 20; // Don't spawn within 20 units of a player
-const MAX_SPAWN_ATTEMPTS = 10; // Try 10 times to find a safe spot
-const BORDER_SPAWN_CHANCE = 0.75; // 75% chance to spawn at the edge
-const BORDER_MARGIN = 20;
-
-// --- Wind Constants ---
-const WIND_PHASE_DURATION = 60000; // 60,000ms = 1 minute per phase
-const INITIAL_CALM_DURATION = 60000; // 1 minute of no wind at the start
-const WIND_SHIFT_DURATION = 5000; // 5,000ms = 5 sec transition time
-const WIND_SCALING_FACTOR = 0.27; // Scale wind speed to game units
-const MAX_WIND_FORCE_COMPONENT = 15; // Max X or Y component of wind force
+import * as C from './GameConstants';
 
 export class GameSimulation {
     private state: GameState;
@@ -101,7 +56,7 @@ export class GameSimulation {
 
     private windProfiles: WindProfile[];
     private currentPhaseIndex = 0;
-    private windPhaseTimer = WIND_PHASE_DURATION;
+    private windPhaseTimer = C.WIND_PHASE_DURATION;
     private targetWindX = 0;
     private targetWindY = 0;
     private isInInitialCalm: boolean = true
@@ -113,7 +68,7 @@ export class GameSimulation {
         this.room = room;
         this.windProfiles = windProfiles;
 
-        this.windPhaseTimer = INITIAL_CALM_DURATION;
+    this.windPhaseTimer = C.INITIAL_CALM_DURATION;
         this.isInInitialCalm = true;
         
         this.targetWindX = 0;
@@ -128,25 +83,25 @@ export class GameSimulation {
 
     public addPlayer(sessionId: string, name: string) {
 
-        const color = PLAYER_COLORS[this.nextColorIndex % PLAYER_COLORS.length];
+    const color = C.PLAYER_COLORS[this.nextColorIndex % C.PLAYER_COLORS.length];
         this.nextColorIndex++;
 
         const player = new Player().assign({
             id: sessionId,
             name: name || "Player",
-            x: (Math.random() * ARENA_WIDTH) - HALF_WIDTH,
-            y: (Math.random() * ARENA_HEIGHT) - HALF_HEIGHT,
+            x: (Math.random() * C.ARENA_WIDTH) - C.HALF_WIDTH,
+            y: (Math.random() * C.ARENA_HEIGHT) - C.HALF_HEIGHT,
             angle: 0,
             score: 0,
             isAlive: true,
-            health: PLAYER_MAX_HEALTH,
+            health: C.PLAYER_MAX_HEALTH,
             color: color
         });
 
         this.state.players.set(sessionId, player);
         this.playerInputs.set(sessionId, { horizontal: 0, vertical: 0, angle: 0 });
 
-        this.playerInvulnerability.set(sessionId, PLAYER_SPAWN_INVULNERABILITY);
+    this.playerInvulnerability.set(sessionId, C.PLAYER_SPAWN_INVULNERABILITY);
         this.playerPostHitInvuln.set(sessionId, 0);
     }
 
@@ -204,9 +159,9 @@ export class GameSimulation {
 
         // 2. Create the internal, non-synced data object
         this.internalBulletData.set(bulletId, {
-            velocityX: Math.cos(angle) * BULLET_SPEED,
-            velocityY: Math.sin(angle) * BULLET_SPEED,
-            life: BULLET_LIFETIME,
+            velocityX: Math.cos(angle) * C.BULLET_SPEED,
+            velocityY: Math.sin(angle) * C.BULLET_SPEED,
+            life: C.BULLET_LIFETIME,
         });
 
         // 3. Add to the state. Colyseus will sync this to all clients.
@@ -223,14 +178,14 @@ export class GameSimulation {
 
         // Convert profile to target forces
         const angleRadians = (profile.direction - 90) * (Math.PI / 180);
-        const force = profile.speed * WIND_SCALING_FACTOR;
+    const force = profile.speed * C.WIND_SCALING_FACTOR;
 
         let forceX = Math.cos(angleRadians) * force;
         let forceY = Math.sin(angleRadians) * force;
 
         // Clamp the final force components to a max value
-        this.targetWindX = Math.max(-MAX_WIND_FORCE_COMPONENT, Math.min(MAX_WIND_FORCE_COMPONENT, forceX));
-        this.targetWindY = Math.max(-MAX_WIND_FORCE_COMPONENT, Math.min(MAX_WIND_FORCE_COMPONENT, forceY));
+    this.targetWindX = Math.max(-C.MAX_WIND_FORCE_COMPONENT, Math.min(C.MAX_WIND_FORCE_COMPONENT, forceX));
+    this.targetWindY = Math.max(-C.MAX_WIND_FORCE_COMPONENT, Math.min(C.MAX_WIND_FORCE_COMPONENT, forceY));
 
         console.log(`[Wind] Shifting to Phase ${phaseIndex}. Target: (${this.targetWindX.toFixed(2)}, ${this.targetWindY.toFixed(2)})`);
         
@@ -296,8 +251,8 @@ export class GameSimulation {
             }
 
             // Apply movement
-            player.x += input.horizontal * PLAYER_SPEED * dt;
-            player.y += input.vertical * PLAYER_SPEED * dt;
+            player.x += input.horizontal * C.PLAYER_SPEED * dt;
+            player.y += input.vertical * C.PLAYER_SPEED * dt;
             player.angle = input.angle;
 
             // --- Apply Arena Current ---
@@ -305,8 +260,8 @@ export class GameSimulation {
             player.y += windY * dt;
             
             // Add boundary checks
-            player.x = Math.max(-HALF_WIDTH, Math.min(HALF_WIDTH, player.x));
-            player.y = Math.max(-HALF_HEIGHT, Math.min(HALF_HEIGHT, player.y));
+            player.x = Math.max(-C.HALF_WIDTH, Math.min(C.HALF_WIDTH, player.x));
+            player.y = Math.max(-C.HALF_HEIGHT, Math.min(C.HALF_HEIGHT, player.y));
         });
     }
 
@@ -319,18 +274,18 @@ export class GameSimulation {
             if (this.isInInitialCalm) {
                 // The calm period is over! Start the first *real* phase
                 this.isInInitialCalm = false;
-                this.windPhaseTimer = WIND_PHASE_DURATION; // Reset timer
+                this.windPhaseTimer = C.WIND_PHASE_DURATION; // Reset timer
                 this.setWindPhase(0); // Set to phase 0
             } else {
                 // We were in a normal phase, so advance
-                this.windPhaseTimer = WIND_PHASE_DURATION; // Reset timer
+                this.windPhaseTimer = C.WIND_PHASE_DURATION; // Reset timer
                 this.setWindPhase(this.currentPhaseIndex + 1); // Go to next phase
             }
         }
 
         // 2. Smoothly interpolate the *actual* wind force towards the *target*
         // This is a simple "lerp" (Linear Interpolation)
-        const lerpFactor = dtSeconds / (WIND_SHIFT_DURATION / 1000);
+    const lerpFactor = dtSeconds / (C.WIND_SHIFT_DURATION / 1000);
 
         this.state.windForceX += (this.targetWindX - this.state.windForceX) * lerpFactor;
         this.state.windForceY += (this.targetWindY - this.state.windForceY) * lerpFactor;
@@ -359,8 +314,8 @@ export class GameSimulation {
 
             // Check for removal (lifetime or out of bounds)
             if (internalData.life <= 0 ||
-                bullet.x < -HALF_WIDTH || bullet.x > HALF_WIDTH ||
-                bullet.y < -HALF_HEIGHT || bullet.y > HALF_HEIGHT)
+                bullet.x < -C.HALF_WIDTH || bullet.x > C.HALF_WIDTH ||
+                bullet.y < -C.HALF_HEIGHT || bullet.y > C.HALF_HEIGHT)
             {
                 this.bulletsToRemove.add(bullet.id);
             }
@@ -400,16 +355,16 @@ export class GameSimulation {
             if (nearestPlayer) {
                 // Move towards player
                 const angle = Math.atan2(nearestPlayer.y - enemy.y, nearestPlayer.x - enemy.x);
-                enemy.x += Math.cos(angle) * ENEMY_SPEED * dt;
-                enemy.y += Math.sin(angle) * ENEMY_SPEED * dt;
+                enemy.x += Math.cos(angle) * C.ENEMY_SPEED * dt;
+                enemy.y += Math.sin(angle) * C.ENEMY_SPEED * dt;
 
                 // --- Apply Arena Current ---
                 enemy.x += windX * dt;
                 enemy.y += windY * dt;
                 
                 // Boundary check
-                enemy.x = Math.max(-HALF_WIDTH, Math.min(HALF_WIDTH, enemy.x));
-                enemy.y = Math.max(-HALF_HEIGHT, Math.min(HALF_HEIGHT, enemy.y));
+                enemy.x = Math.max(-C.HALF_WIDTH, Math.min(C.HALF_WIDTH, enemy.x));
+                enemy.y = Math.max(-C.HALF_HEIGHT, Math.min(C.HALF_HEIGHT, enemy.y));
             }
         });
     }
@@ -431,7 +386,7 @@ export class GameSimulation {
                 if (enemy && !this.enemiesToRemove.has(enemy.id)) {
                     const distance = Math.hypot(bullet.x - enemy.x, bullet.y - enemy.y);
                     
-                    if (distance < BULLET_HIT_RADIUS + ENEMY_HIT_RADIUS) {
+                    if (distance < C.BULLET_HIT_RADIUS + C.ENEMY_HIT_RADIUS) {
                         // HIT!
                         this.bulletsToRemove.add(bullet.id);
                         this.enemiesToRemove.add(enemy.id);
@@ -468,11 +423,11 @@ export class GameSimulation {
                 if (enemy && !this.enemiesToRemove.has(enemy.id)) {
                     const distance = Math.hypot(player.x - enemy.x, player.y - enemy.y);
                     
-                    if (distance < PLAYER_HIT_RADIUS + ENEMY_HIT_RADIUS) {
+                    if (distance < C.PLAYER_HIT_RADIUS + C.ENEMY_HIT_RADIUS) {
                         // Player is hit!
-                        player.health -= ENEMY_DAMAGE;
+                        player.health -= C.ENEMY_DAMAGE;
 
-                        this.playerPostHitInvuln.set(player.id, PLAYER_POST_HIT_INVULNERABILITY);
+                        this.playerPostHitInvuln.set(player.id, C.PLAYER_POST_HIT_INVULNERABILITY);
 
                         this.room.broadcast("player_hit", { sessionId: player.id });
 
@@ -503,26 +458,26 @@ export class GameSimulation {
         let spawnY = 0;
         let isSafe = false;
 
-        // Define the "center" rectangle coordinates
-        const CENTER_MIN_X = -HALF_WIDTH + BORDER_MARGIN;  // e.g., -40 + 20 = -20
-        const CENTER_MAX_X = HALF_WIDTH - BORDER_MARGIN;   // e.g.,  40 - 20 =  20
-        const CENTER_MIN_Y = -HALF_HEIGHT + BORDER_MARGIN; // e.g., -20
-        const CENTER_MAX_Y = HALF_HEIGHT - BORDER_MARGIN;  // e.g.,  20
-        
-        // The total width/height of the inner center area
-        const CENTER_WIDTH = ARENA_WIDTH - (BORDER_MARGIN * 2);   // e.g., 40
-        const CENTER_HEIGHT = ARENA_HEIGHT - (BORDER_MARGIN * 2); // e.g., 40
+    // Define the "center" rectangle coordinates
+    const CENTER_MIN_X = -C.HALF_WIDTH + C.BORDER_MARGIN;  // e.g., -40 + 20 = -20
+    const CENTER_MAX_X = C.HALF_WIDTH - C.BORDER_MARGIN;   // e.g.,  40 - 20 =  20
+    const CENTER_MIN_Y = -C.HALF_HEIGHT + C.BORDER_MARGIN; // e.g., -20
+    const CENTER_MAX_Y = C.HALF_HEIGHT - C.BORDER_MARGIN;  // e.g.,  20
 
-        // Try up to MAX_SPAWN_ATTEMPTS times to find a safe spot
-        for (let i = 0; i < MAX_SPAWN_ATTEMPTS; i++) {
+    // The total width/height of the inner center area
+    const CENTER_WIDTH = C.ARENA_WIDTH - (C.BORDER_MARGIN * 2);   // e.g., 40
+    const CENTER_HEIGHT = C.ARENA_HEIGHT - (C.BORDER_MARGIN * 2); // e.g., 40
+
+    // Try up to MAX_SPAWN_ATTEMPTS times to find a safe spot
+    for (let i = 0; i < C.MAX_SPAWN_ATTEMPTS; i++) {
             
             // --- 1. Generate a weighted spawn point ---
-            if (Math.random() < BORDER_SPAWN_CHANCE) {
+            if (Math.random() < C.BORDER_SPAWN_CHANCE) {
                 // --- Try to spawn in the BORDER area ---
                 
                 // Pick a random point in the *whole* arena
-                spawnX = (Math.random() * ARENA_WIDTH) - HALF_WIDTH;  // -40 to 40
-                spawnY = (Math.random() * ARENA_HEIGHT) - HALF_HEIGHT; // -40 to 40
+                spawnX = (Math.random() * C.ARENA_WIDTH) - C.HALF_WIDTH;  // -40 to 40
+                spawnY = (Math.random() * C.ARENA_HEIGHT) - C.HALF_HEIGHT; // -40 to 40
 
                 // Check if it's in the center
                 const inCenter = spawnX > CENTER_MIN_X && spawnX < CENTER_MAX_X &&
@@ -534,16 +489,16 @@ export class GameSimulation {
                     const side = Math.floor(Math.random() * 4);
                     switch (side) {
                         case 0: // Push to Top border
-                            spawnY = (Math.random() * BORDER_MARGIN) + CENTER_MAX_Y; // 20 to 40
+                            spawnY = (Math.random() * C.BORDER_MARGIN) + CENTER_MAX_Y; // 20 to 40
                             break;
                         case 1: // Push to Bottom border
-                            spawnY = -((Math.random() * BORDER_MARGIN) + CENTER_MAX_Y); // -20 to -40
+                            spawnY = -((Math.random() * C.BORDER_MARGIN) + CENTER_MAX_Y); // -20 to -40
                             break;
                         case 2: // Push to Right border
-                            spawnX = (Math.random() * BORDER_MARGIN) + CENTER_MAX_X; // 20 to 40
+                            spawnX = (Math.random() * C.BORDER_MARGIN) + CENTER_MAX_X; // 20 to 40
                             break;
                         case 3: // Push to Left border
-                            spawnX = -((Math.random() * BORDER_MARGIN) + CENTER_MAX_X); // -20 to -40
+                            spawnX = -((Math.random() * C.BORDER_MARGIN) + CENTER_MAX_X); // -20 to -40
                             break;
                     }
                 }
@@ -561,7 +516,7 @@ export class GameSimulation {
                 if (!player.isAlive) continue;
 
                 const distance = Math.hypot(spawnX - player.x, spawnY - player.y);
-                if (distance < MIN_SPAWN_DISTANCE_FROM_PLAYER) {
+                if (distance < C.MIN_SPAWN_DISTANCE_FROM_PLAYER) {
                     isSafe = false; // Too close!
                     break; 
                 }
@@ -600,8 +555,8 @@ export class GameSimulation {
         const enemy = new Enemy().assign({
             id: enemyId,
             type: 0, // Grunt
-            x: (Math.random() * ARENA_WIDTH) - HALF_WIDTH,
-            y: (Math.random() * ARENA_HEIGHT) - HALF_HEIGHT,
+            x: (Math.random() * C.ARENA_WIDTH) - C.HALF_WIDTH,
+            y: (Math.random() * C.ARENA_HEIGHT) - C.HALF_HEIGHT,
         });
 
         this.state.enemies.set(enemyId, enemy);
@@ -631,8 +586,8 @@ export class GameSimulation {
      * [NEW] Calculates the grid cell key for a given position.
      */
     private getCellKey(x: number, y: number): string {
-        const cellX = Math.floor(x / CELL_SIZE);
-        const cellY = Math.floor(y / CELL_SIZE);
+        const cellX = Math.floor(x / C.CELL_SIZE);
+        const cellY = Math.floor(y / C.CELL_SIZE);
         return `${cellX}_${cellY}`;
     }
 
@@ -663,8 +618,8 @@ export class GameSimulation {
      */
     private getNearbyEntities(x: number, y: number): Set<string> {
         const nearbyEntities = new Set<string>();
-        const originCellX = Math.floor(x / CELL_SIZE);
-        const originCellY = Math.floor(y / CELL_SIZE);
+        const originCellX = Math.floor(x / C.CELL_SIZE);
+        const originCellY = Math.floor(y / C.CELL_SIZE);
 
         for (let i = -1; i <= 1; i++) {
             for (let j = -1; j <= 1; j++) {
