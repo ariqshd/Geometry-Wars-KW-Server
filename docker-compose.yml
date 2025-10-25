@@ -9,3 +9,9 @@ services:
     env_file:
       - ./.env.production
     restart: always
+    networks:
+      - my-shared-network
+
+networks:
+  my-shared-network:
+    external: true
