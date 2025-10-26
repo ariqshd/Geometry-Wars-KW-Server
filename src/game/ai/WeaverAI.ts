@@ -1,5 +1,6 @@
 import { Enemy, GameState } from "../../rooms/schema/GameState";
 import { EnemyAI_Base } from "./EnemyAI_Base";
+import * as C from "../GameConstants"; 
 
 export class WeaverAI extends EnemyAI_Base {
     // Store its own velocity
