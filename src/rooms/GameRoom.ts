@@ -28,6 +28,9 @@ export class GameRoom extends Room<GameState> {
       this.simulation.handleShoot(client.sessionId, message);
     });
 
+    this.onMessage("respawn", (client) => {
+            this.simulation.respawnPlayer(client.sessionId);
+        });
   }
 
   onJoin (client: Client, options: any) {

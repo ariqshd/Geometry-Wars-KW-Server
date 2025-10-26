@@ -44,6 +44,7 @@ export class GameSimulation {
     // Game logic timers
     private enemySpawnTimer: number = 0;
     private readonly enemySpawnInterval: number = 1000; // 1 second
+    private spawningPaused: boolean = false;
     
     // --- Spatial Grid ---
     // Key: "cellX_cellY", Value: Set of entity IDs in that cell
@@ -71,6 +72,7 @@ export class GameSimulation {
     private spawnTimer = 0;
 
     private enemyAIs = new Map<string, EnemyAI_Base>();
+    
     
     constructor(state: GameState, room: GameRoom, windProfiles: WindProfile[]){
         this.state = state;
@@ -106,7 +108,7 @@ export class GameSimulation {
         this.processPlayerInputs(dtSeconds);
         this.updateSpatialGrid();
         this.updateDifficulty(deltaTime);
-        this.updateSpawning(deltaTime);
+        if (!this.spawningPaused) this.updateSpawning(deltaTime);
         this.updateEnemies(dtSeconds);
         this.updateBullets(dtSeconds); // Moves bullets, flags expired ones for removal
         this.checkCollisions();
@@ -137,8 +139,9 @@ export class GameSimulation {
         this.state.players.set(sessionId, player);
         this.playerInputs.set(sessionId, { horizontal: 0, vertical: 0, angle: 0 });
 
-    this.playerInvulnerability.set(sessionId, C.PLAYER_SPAWN_INVULNERABILITY);
+        this.playerInvulnerability.set(sessionId, C.PLAYER_SPAWN_INVULNERABILITY);
         this.playerPostHitInvuln.set(sessionId, 0);
+        this.checkIfSpawningShouldPause();
     }
 
     public removePlayer(sessionId: string) {
@@ -146,6 +149,7 @@ export class GameSimulation {
         this.playerInputs.delete(sessionId);
         this.playerInvulnerability.delete(sessionId);
         this.playerPostHitInvuln.delete(sessionId);
+        this.checkIfSpawningShouldPause();
     }
 
     /**
@@ -424,6 +428,7 @@ export class GameSimulation {
         }
 
         // --- Check Player vs. Enemies ---
+        let someoneDiedThisFrame = false;
         for (const player of this.state.players.values()) {
             if (!player.isAlive) continue;
 
@@ -452,13 +457,40 @@ export class GameSimulation {
 
                         if (player.health <= 0) {
                             player.isAlive = false;
+                            player.health = 0;
                             this.room.broadcast("player_died", { sessionId: player.id });
+                            someoneDiedThisFrame = true;
                         }
 
                         this.enemiesToRemove.add(enemy.id);
                     }
                 }
             }
+        }
+
+        if (someoneDiedThisFrame) {
+            this.checkIfSpawningShouldPause();
+        }
+    }
+
+    private checkIfSpawningShouldPause() {
+        let allDead = true;
+        if (this.state.players.size === 0) {
+            allDead = false; // No players, no need to pause
+        } else {
+            this.state.players.forEach((p) => {
+                if (p.isAlive) {
+                    allDead = false;
+                }
+            });
+        }
+
+        if (allDead && !this.spawningPaused) {
+            console.log("[Spawning] All players are dead. Pausing enemy spawning.");
+            this.spawningPaused = true;
+        } else if (!allDead && this.spawningPaused) {
+            console.log("[Spawning] At least one player is alive. Resuming enemy spawning.");
+            this.spawningPaused = false;
         }
     }
 
@@ -676,5 +708,30 @@ export class GameSimulation {
             }
         }
         return nearbyEntities;
+    }
+
+    public respawnPlayer(sessionId: string) {
+        const player = this.state.players.get(sessionId);
+
+        // Can only respawn if the player exists and is currently dead
+        if (!player || player.isAlive) {
+            return;
+        }
+
+        console.log("Respawning player:", sessionId);
+
+        // Reset player state
+        player.isAlive = true;
+        player.health = C.PLAYER_MAX_HEALTH;
+        player.score = 0;
+        // player.x = (Math.random() * C.ARENA_WIDTH) - C.HALF_WIDTH; // Respawn at random location
+        // player.y = (Math.random() * C.ARENA_HEIGHT) - C.HALF_HEIGHT;
+
+        // Reset timers
+        this.playerInvulnerability.set(sessionId, C.PLAYER_SPAWN_INVULNERABILITY);
+        this.playerPostHitInvuln.set(sessionId, 0);
+        this.checkIfSpawningShouldPause();
+        // Optionally, broadcast a respawn event if needed
+        // this.room.broadcast("player_respawn", { sessionId });
     }
 }
