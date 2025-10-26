@@ -22,6 +22,7 @@ jobs:
         # The commands to run on your server
         script: |
           cd ~/Geometry-Wars-KW-Server
+          git reset --hard HEAD
           git pull
           docker-compose down
           docker-compose up -d --build
