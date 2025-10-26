@@ -46,3 +46,17 @@ export const INITIAL_CALM_DURATION = 60000; // 1 minute of no wind at the start
 export const WIND_SHIFT_DURATION = 5000; // 5,000ms = 5 sec transition time
 export const WIND_SCALING_FACTOR = 0.27; // Scale wind speed to game units
 export const MAX_WIND_FORCE_COMPONENT = 15; // Max X or Y component of wind force
+
+// --- ADD NEW DYNAMIC DIFFICULTY CONSTANTS ---
+export const DIFFICULTY_INCREASE_INTERVAL = 10000; // Increase difficulty every 10 seconds
+export const BASE_THREAT_PER_LEVEL = 10;       // How much "threat" to add per level
+export const PLAYER_THREAT_MULTIPLIER = 0.5;   // Add 50% threat for each *additional* player
+
+export const BASE_SPAWN_INTERVAL = 500; // Try to spawn an enemy every 0.5 seconds
+
+// Define the "cost" of each enemy.
+export const ENEMY_COSTS: { [key: number]: number } = {
+    0: 1,  // Grunt (Type 0) costs 1 threat point
+    1: 5,  // e.g., A "Weaver" (Type 1) costs 5
+    2: 10, // e.g., A "Spinner" (Type 2) costs 10
+};

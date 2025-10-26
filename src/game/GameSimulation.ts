@@ -2,6 +2,10 @@
 
 import { GameState, Player, Enemy, Bullet } from "../rooms/schema/GameState";
 import { GameRoom } from "../rooms/GameRoom";
+import { EnemyAI_Base } from "./ai/EnemyAI_Base";
+import { GruntAI } from "./ai/GruntAI";
+import { WeaverAI } from "./ai/WeaverAI";
+import * as C from './GameConstants';
 
 // Define the structure for storing non-synced bullet data
 interface InternalBulletData {
@@ -21,7 +25,6 @@ interface WindProfile {
     speed: number;
     direction: number;
 }
-import * as C from './GameConstants';
 
 export class GameSimulation {
     private state: GameState;
@@ -62,19 +65,52 @@ export class GameSimulation {
     private isInInitialCalm: boolean = true
 
     private nextColorIndex = 0;
+
+    private difficultyLevel = 1;
+    private difficultyTimer = 0;
+    private spawnTimer = 0;
+
+    private enemyAIs = new Map<string, EnemyAI_Base>();
     
     constructor(state: GameState, room: GameRoom, windProfiles: WindProfile[]){
         this.state = state;
         this.room = room;
         this.windProfiles = windProfiles;
 
-    this.windPhaseTimer = C.INITIAL_CALM_DURATION;
+        this.windPhaseTimer = C.INITIAL_CALM_DURATION;
         this.isInInitialCalm = true;
         
         this.targetWindX = 0;
         this.targetWindY = 0;
         this.state.windForceX = 0;
         this.state.windForceY = 0;
+
+        this.state.difficultyLevel = 1;
+        this.difficultyLevel = 1;
+        this.difficultyTimer = C.DIFFICULTY_INCREASE_INTERVAL;
+        this.spawnTimer = C.BASE_SPAWN_INTERVAL;
+    }
+
+    /**
+     * This is the main game loop, called by setSimulationInterval.
+     * Order of operations is now critical.
+     */
+    public update(deltaTime: number) {
+        const dtSeconds = deltaTime / 1000; // Convert ms to seconds
+
+        this.bulletsToRemove.clear();
+        this.enemiesToRemove.clear();
+
+        this.updateTimers(deltaTime);
+        this.updateWind(deltaTime, dtSeconds);
+        this.processPlayerInputs(dtSeconds);
+        this.updateSpatialGrid();
+        this.updateDifficulty(deltaTime);
+        this.updateSpawning(deltaTime);
+        this.updateEnemies(dtSeconds);
+        this.updateBullets(dtSeconds); // Moves bullets, flags expired ones for removal
+        this.checkCollisions();
+        this.cleanupEntities();
     }
 
     // =================================================================
@@ -178,14 +214,14 @@ export class GameSimulation {
 
         // Convert profile to target forces
         const angleRadians = (profile.direction - 90) * (Math.PI / 180);
-    const force = profile.speed * C.WIND_SCALING_FACTOR;
+        const force = profile.speed * C.WIND_SCALING_FACTOR;
 
         let forceX = Math.cos(angleRadians) * force;
         let forceY = Math.sin(angleRadians) * force;
 
         // Clamp the final force components to a max value
-    this.targetWindX = Math.max(-C.MAX_WIND_FORCE_COMPONENT, Math.min(C.MAX_WIND_FORCE_COMPONENT, forceX));
-    this.targetWindY = Math.max(-C.MAX_WIND_FORCE_COMPONENT, Math.min(C.MAX_WIND_FORCE_COMPONENT, forceY));
+        this.targetWindX = Math.max(-C.MAX_WIND_FORCE_COMPONENT, Math.min(C.MAX_WIND_FORCE_COMPONENT, forceX));
+        this.targetWindY = Math.max(-C.MAX_WIND_FORCE_COMPONENT, Math.min(C.MAX_WIND_FORCE_COMPONENT, forceY));
 
         console.log(`[Wind] Shifting to Phase ${phaseIndex}. Target: (${this.targetWindX.toFixed(2)}, ${this.targetWindY.toFixed(2)})`);
         
@@ -193,37 +229,56 @@ export class GameSimulation {
         this.room.broadcast("wind_shift_warning", { windX: this.targetWindX, windY: this.targetWindY });
     }
 
-    /**
-     * This is the main game loop, called by setSimulationInterval.
-     * Order of operations is now critical.
-     */
-    public update(deltaTime: number) {
-        const dtSeconds = deltaTime / 1000; // Convert ms to seconds
-
-        this.bulletsToRemove.clear();
-        this.enemiesToRemove.clear();
-
-        this.updateTimers(deltaTime);
-        
-        this.processPlayerInputs(dtSeconds);
-
-        this.updateWind(deltaTime, dtSeconds);
-
-        this.updateAI(dtSeconds);        // Moves enemies
-        this.updateBullets(dtSeconds); // Moves bullets, flags expired ones for removal
-
-        this.updateSpatialGrid();
-
-        this.checkCollisions();
-
-        this.updateSpawning(deltaTime);
-
-        this.cleanupEntities();
-    }
 
     // =================================================================
     // PRIVATE - SIMULATION LOGIC
     // =================================================================
+
+    /**
+     * Increases the difficulty level over time.
+     */
+    private updateDifficulty(deltaTime: number) {
+        this.difficultyTimer -= deltaTime;
+        if (this.difficultyTimer <= 0) {
+            this.difficultyLevel++;
+            this.state.difficultyLevel = this.difficultyLevel; // Sync to client
+            this.difficultyTimer = C.DIFFICULTY_INCREASE_INTERVAL;
+        }
+    }
+
+    /**
+     * Calculates the total "threat" currently on the map.
+     */
+    private calculateCurrentThreat(): number {
+        let currentThreat = 0;
+        this.state.enemies.forEach((enemy) => {
+            currentThreat += C.ENEMY_COSTS[enemy.type] || 1;
+        });
+        return currentThreat;
+    }
+
+    private calculateMaxThreat(): number {
+        const baseThreat = this.difficultyLevel * C.BASE_THREAT_PER_LEVEL;
+        const playerCount = this.state.players.size;
+        const playerMultiplier = 1 + (playerCount - 1) * C.PLAYER_THREAT_MULTIPLIER;
+
+        return baseThreat * playerMultiplier;
+    }
+
+    private chooseEnemyType(maxThreat: number): number {
+        // If threat is > 50, 10% chance to spawn a Type 1
+        if (maxThreat > 50 && Math.random() < 0.1) {
+            return 1;
+        }
+        
+        // If threat is > 150, 5% chance to spawn a Type 2
+        if (maxThreat > 150 && Math.random() < 0.05) {
+            return 2;
+        }
+
+        // Default to Type 0
+        return 0;
+    }
 
     private updateTimers(deltaTime: number) {
         this.playerInvulnerability.forEach((timeLeft, sessionId) => {
@@ -285,7 +340,7 @@ export class GameSimulation {
 
         // 2. Smoothly interpolate the *actual* wind force towards the *target*
         // This is a simple "lerp" (Linear Interpolation)
-    const lerpFactor = dtSeconds / (C.WIND_SHIFT_DURATION / 1000);
+        const lerpFactor = dtSeconds / (C.WIND_SHIFT_DURATION / 1000);
 
         this.state.windForceX += (this.targetWindX - this.state.windForceX) * lerpFactor;
         this.state.windForceY += (this.targetWindY - this.state.windForceY) * lerpFactor;
@@ -325,46 +380,10 @@ export class GameSimulation {
     /**
      * Uses spatial grid to find nearest player.
      */
-    private updateAI(dt: number) {
-
-        const windX = this.state.windForceX;
-        const windY = this.state.windForceY;
-
-        this.state.enemies.forEach((enemy) => {
-            
-            // Find nearby entities using the grid
-            const nearbyEntities = this.getNearbyEntities(enemy.x, enemy.y);
-            
-            // Find nearest player from the *nearby* set
-            let nearestPlayer: Player = null;
-            let minDistance = Infinity;
-
-            for (const entityId of nearbyEntities) {
-                const player = this.state.players.get(entityId);
-                
-                // Check if it's a player and is alive
-                if (player && player.isAlive) {
-                    const dist = Math.hypot(enemy.x - player.x, enemy.y - player.y);
-                    if (dist < minDistance) {
-                        minDistance = dist;
-                        nearestPlayer = player;
-                    }
-                }
-            }
-
-            if (nearestPlayer) {
-                // Move towards player
-                const angle = Math.atan2(nearestPlayer.y - enemy.y, nearestPlayer.x - enemy.x);
-                enemy.x += Math.cos(angle) * C.ENEMY_SPEED * dt;
-                enemy.y += Math.sin(angle) * C.ENEMY_SPEED * dt;
-
-                // --- Apply Arena Current ---
-                enemy.x += windX * dt;
-                enemy.y += windY * dt;
-                
-                // Boundary check
-                enemy.x = Math.max(-C.HALF_WIDTH, Math.min(C.HALF_WIDTH, enemy.x));
-                enemy.y = Math.max(-C.HALF_HEIGHT, Math.min(C.HALF_HEIGHT, enemy.y));
+    private updateEnemies(dt: number) {
+        this.enemyAIs.forEach((ai, id) => {
+            if (this.state.enemies.has(id)) {
+                ai.update(dt);
             }
         });
     }
@@ -444,16 +463,25 @@ export class GameSimulation {
     }
 
     private updateSpawning(deltaTime: number) {
-        this.enemySpawnTimer += deltaTime;
-        if (this.enemySpawnTimer < this.enemySpawnInterval) {
-            return;
+        this.spawnTimer -= deltaTime;
+        if (this.spawnTimer > 0) {
+            return; // Not time to spawn yet
         }
         
-        this.enemySpawnTimer = 0; // Reset timer
-        this.spawnEnemy();
+        this.spawnTimer = C.BASE_SPAWN_INTERVAL; // Reset timer
+
+        const currentThreat = this.calculateCurrentThreat();
+        const maxThreat = this.calculateMaxThreat();
+
+        // If we are below our "threat budget", spawn an enemy
+        if (currentThreat < maxThreat) {
+            // This is where you can add logic for *which* enemy to spawn
+            const enemyType = this.chooseEnemyType(maxThreat);
+            this.spawnEnemy(enemyType);
+        }
     }
 
-    private spawnEnemy() {
+    private spawnEnemy(enemyType: number) {
         let spawnX = 0;
         let spawnY = 0;
         let isSafe = false;
@@ -531,12 +559,25 @@ export class GameSimulation {
         const enemyId = `enemy_${this.entityIdCounter++}`;
         const enemy = new Enemy().assign({
             id: enemyId,
-            type: 0,
+            type: enemyType,
             x: spawnX,
             y: spawnY,
         });
 
         this.state.enemies.set(enemyId, enemy);
+
+        let ai: EnemyAI_Base;
+        switch (enemyType) {
+            case 1:
+                ai = new WeaverAI(enemy, this.state, C);
+                break;
+            case 0:
+            default:
+                ai = new GruntAI(enemy, this.state, C);
+                break;
+        }
+
+        this.enemyAIs.set(enemyId, ai);
     }
 
     /**
@@ -569,7 +610,10 @@ export class GameSimulation {
         // Remove enemies
         this.enemiesToRemove.forEach((id) => {
             this.state.enemies.delete(id);
+            this.enemyAIs.delete(id);
         });
+
+        this.enemiesToRemove.clear();
         
         // Remove bullets
         this.bulletsToRemove.forEach((id) => {

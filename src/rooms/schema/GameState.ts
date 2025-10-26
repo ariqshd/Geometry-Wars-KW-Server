@@ -39,4 +39,5 @@ export class GameState extends Schema {
   @type("float32") windForceX: number = 0;
   @type("float32") windForceY: number = 0;
   @type("uint8") gamePhase!: number;
+  @type("uint16") difficultyLevel: number = 1;
 }
