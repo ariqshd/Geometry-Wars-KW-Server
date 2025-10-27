@@ -12,6 +12,7 @@ RUN npm ci
 
 COPY . .
 
+COPY ecosystem.config.cjs .
 # Run the TypeScript build script
 # (Assumes you have a "build" script in package.json, e.g., "build": "tsc")
 RUN npm run build
@@ -34,12 +35,11 @@ RUN npm ci --only=production
 # Copy the compiled code from the 'builder' stage
 # This assumes your "build" script outputs to a 'dist' folder
 COPY --from=builder /usr/src/app/build ./build
+COPY --from=builder /usr/src/app/ecosystem.config.cjs .
 
 # Set the port
 ENV PORT=2567
 EXPOSE 2567
 
-# The command to run your server
-# This assumes your package.json has a "start" script
-# e.g., "start": "node dist/index.js"
-CMD ["node", "build/index.js"]
+# Use the .cjs file in the CMD
+CMD ["pm2-runtime", "start", "ecosystem.config.cjs"]

@@ -8,7 +8,8 @@
     "node": ">= 20.9.0"
   },
   "scripts": {
-    "start": "tsx watch src/index.ts",
+    "start": "node build/index.js",
+    "dev": "tsx watch src/index.ts",
     "loadtest": "tsx loadtest/example.ts --room GameRoom --numClients 2",
     "build": "npm run clean && tsc",
     "clean": "rimraf build",
@@ -33,9 +34,11 @@
   "dependencies": {
     "@colyseus/monitor": "^0.16.0",
     "@colyseus/playground": "^0.16.0",
+    "@colyseus/redis-presence": "^0.16.4",
     "@colyseus/tools": "^0.16.0",
     "axios": "^1.12.2",
     "colyseus": "^0.16.0",
-    "express": "^4.18.2"
+    "express": "^4.18.2",
+    "pm2": "^6.0.13"
   }
 }

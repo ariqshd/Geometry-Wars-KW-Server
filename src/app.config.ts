@@ -2,18 +2,22 @@ import config from "@colyseus/tools";
 import { monitor } from "@colyseus/monitor";
 import { playground } from "@colyseus/playground";
 
-/**
- * Import your Room files
- */
+import { RedisPresence } from "@colyseus/redis-presence";
+import { Server } from "colyseus";
+
 import { GameRoom } from "./rooms/GameRoom";
 import { WeatherService } from "./services/WeatherService";
 
 export default config({
 
-    initializeGameServer: (gameServer) => {
-        /**
-         * Define your room handlers:
-         */
+    initializeGameServer: (gameServer: Server) => {
+        // Configure Redis Presence
+        // It will automatically connect to "redis://redis:6379"
+        // because our Docker service is named 'redis'
+        gameServer.attach({
+            presence: new RedisPresence(),
+        });
+
         gameServer.define('GameRoom', GameRoom);
 
     },

@@ -11,6 +11,14 @@ services:
     restart: always
     networks:
       - my-shared-network
+    depends_on:
+    - redis
+
+  redis:
+    image: redis:alpine
+    restart: always
+    networks:
+      - my-shared-network
 
 networks:
   my-shared-network:
