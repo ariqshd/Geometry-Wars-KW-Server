@@ -2,6 +2,10 @@
 
 ![Gameplay Demo](images/gameplay-demo.gif)
 
+
+**🎮 Play the Game Here:** [**https://playcanv.as/p/tybE8guH**](https://playcanv.as/p/tybE8guH)
+*(Note: Requires a browser with WebSocket support. Best played on Desktop.)*
+
 ## 🎮 Project Overview
 
 * **Goal:** A multiplayer, multiplatform action shooter inspired by Geometry Wars, developed as a technical test for a Backend Programmer role.
