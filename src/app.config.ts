@@ -1,7 +1,7 @@
 import config from "@colyseus/tools";
 import { monitor } from "@colyseus/monitor";
 import { playground } from "@colyseus/playground";
-
+import { WebSocketTransport } from "@colyseus/ws-transport";
 import { RedisPresence } from "@colyseus/redis-presence";
 import { Server } from "colyseus";
 
@@ -15,7 +15,11 @@ export default config({
         // It will automatically connect to "redis://redis:6379"
         // because our Docker service is named 'redis'
         gameServer.attach({
-            presence: new RedisPresence(),
+            transport: new WebSocketTransport(),
+            presence: new RedisPresence({
+                host: "redis",
+                port: 6379,
+            }),
         });
 
         gameServer.define('GameRoom', GameRoom);
