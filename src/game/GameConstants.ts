@@ -11,16 +11,19 @@ export const PLAYER_COLORS = [
     "#FFA500", // Orange
 ];
 
-// --- Game Constants ---
+// --- Player Constants ---
+export const PLAYER_FIRE_RATE = 100;
 export const PLAYER_SPEED = 25; // Pixels per second
-export const BULLET_SPEED = 40;
-export const ENEMY_SPEED = 15;
-export const BULLET_LIFETIME = 1000; // 1 second
-export const PLAYER_SPAWN_INVULNERABILITY = 3000; // 3000ms = 3 seconds
-export const AI_STOPPING_DISTANCE = 20; // Stop AI 20 units from player (fixes AI loop)
-export const PLAYER_MAX_HEALTH = 3;
-export const ENEMY_DAMAGE = 1;
 export const PLAYER_POST_HIT_INVULNERABILITY = 500; // 0.5 sec
+export const PLAYER_SPAWN_INVULNERABILITY = 3000; // 3000ms = 3 seconds
+export const PLAYER_MAX_HEALTH = 3;
+
+export const BULLET_SPEED = 40;
+export const BULLET_LIFETIME = 1000; // 1 second
+
+export const ENEMY_SPEED = 15;
+export const ENEMY_DAMAGE = 1;
+export const AI_STOPPING_DISTANCE = 20; // Stop AI 20 units from player (fixes AI loop)
 
 // --- Arena & Grid Constants ---
 export const ARENA_WIDTH = 80;

@@ -57,6 +57,7 @@ export class GameSimulation {
 
     private playerInvulnerability = new Map<string, number>(); // <sessionId, ms_remaining>
     private playerPostHitInvuln = new Map<string, number>();
+    private lastShootTime = new Map<string, number>(); // Track last input time for rate limiting
 
     private windProfiles: WindProfile[];
     private currentPhaseIndex = 0;
@@ -141,6 +142,7 @@ export class GameSimulation {
 
         this.playerInvulnerability.set(sessionId, C.PLAYER_SPAWN_INVULNERABILITY);
         this.playerPostHitInvuln.set(sessionId, 0);
+        this.lastShootTime.set(sessionId, 0);
         this.checkIfSpawningShouldPause();
     }
 
@@ -149,6 +151,7 @@ export class GameSimulation {
         this.playerInputs.delete(sessionId);
         this.playerInvulnerability.delete(sessionId);
         this.playerPostHitInvuln.delete(sessionId);
+        this.lastShootTime.delete(sessionId);
         this.checkIfSpawningShouldPause();
     }
 
@@ -184,6 +187,20 @@ export class GameSimulation {
     public handleShoot(sessionId: string, shootData: { angle: number }) {
         const player = this.state.players.get(sessionId);
         if (!player || !player.isAlive) return;
+
+        // Rate limit shooting
+        const now = Date.now();
+        const lastShot = this.lastShootTime.get(sessionId) || 0;
+        // Add a small buffer (e.g., 10ms) to account for network jitter
+        const serverFireRate = C.PLAYER_FIRE_RATE - 10;
+
+        if (now - lastShot < serverFireRate) {
+            // Firing too fast! Ignore the request.
+            // console.warn(`Player ${sessionId} firing too fast!`);
+            return;
+        }
+
+        this.lastShootTime.set(sessionId, now);
 
         // Use reliable, incrementing ID
         const bulletId = `bullet_${this.entityIdCounter++}`;
@@ -309,18 +326,36 @@ export class GameSimulation {
                 return;
             }
 
+            const prevX = player.x;
+            const prevY = player.y;
+
             // Apply movement
             player.x += input.horizontal * C.PLAYER_SPEED * dt;
             player.y += input.vertical * C.PLAYER_SPEED * dt;
-            player.angle = input.angle;
 
             // --- Apply Arena Current ---
             player.x += windX * dt;
             player.y += windY * dt;
-            
-            // Add boundary checks
-            player.x = Math.max(-C.HALF_WIDTH, Math.min(C.HALF_WIDTH, player.x));
-            player.y = Math.max(-C.HALF_HEIGHT, Math.min(C.HALF_HEIGHT, player.y));
+            player.angle = input.angle;
+
+            // Speed hack detection
+            const distanceMoved = Math.hypot(player.x - prevX, player.y - prevY);
+            const maxPossibleSpeed = C.PLAYER_SPEED + C.MAX_WIND_FORCE_COMPONENT;
+            // Allow a small buffer (e.g., 20%) for floating point errors / minor lag
+            const maxAllowedDistance = maxPossibleSpeed * dt * 1.2;
+
+            if (distanceMoved > maxAllowedDistance) {
+                console.warn(`Player ${sessionId} moved too fast! Pos (${player.x.toFixed(2)}, ${player.y.toFixed(2)}), Dist: ${distanceMoved.toFixed(2)}, Max: ${maxAllowedDistance.toFixed(2)}. Reverting.`);
+                // Revert to previous position to counter potential speed hack
+                // TODO: involve position interpolation/reconciliation
+                player.x = prevX;
+                player.y = prevY;
+            }
+            else {
+                // Add boundary checks
+                player.x = Math.max(-C.HALF_WIDTH, Math.min(C.HALF_WIDTH, player.x));
+                player.y = Math.max(-C.HALF_HEIGHT, Math.min(C.HALF_HEIGHT, player.y));
+            }
         });
     }
 
