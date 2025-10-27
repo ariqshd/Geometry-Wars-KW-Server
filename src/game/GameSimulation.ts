@@ -104,15 +104,26 @@ export class GameSimulation {
         this.bulletsToRemove.clear();
         this.enemiesToRemove.clear();
 
+        // Update internal states & timers
         this.updateTimers(deltaTime);
         this.updateWind(deltaTime, dtSeconds);
-        this.processPlayerInputs(dtSeconds);
-        this.updateSpatialGrid();
         this.updateDifficulty(deltaTime);
+
+        // Process inputs & move entities
+        this.processPlayerInputs(dtSeconds); // Moves players
+        this.updateEnemies(dtSeconds);       // Moves enemies
+        this.updateBullets(dtSeconds);       // Moves bullets
+
+        // Spawn new enemies for this frame (if needed)
         if (!this.spawningPaused) this.updateSpawning(deltaTime);
-        this.updateEnemies(dtSeconds);
-        this.updateBullets(dtSeconds); // Moves bullets, flags expired ones for removal
+
+        // Rebuild spatial grid AFTER all movement
+        this.updateSpatialGrid();
+
+        // Check collisions using the updated grid
         this.checkCollisions();
+
+        // Remove entities flagged for removal
         this.cleanupEntities();
     }
 
